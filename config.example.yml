@@ -1,0 +1,65 @@
+mode: "Transform"
+
+log:
+  level: "info"
+  format: "text"
+
+server:
+  addr: "127.0.0.1:38440"
+
+persistence:
+  active_provider: db_sqlite
+
+extensions:
+  deepseek_v4:
+    config:
+      reinforce_instructions: true
+      reinforce_prompt: "[System Reminder]: Please pay close attention to the system instructions, AGENTS.md files, and any other context provided. Follow them carefully and completely in your response.\n[User]:"
+  db_sqlite:
+    enabled: true
+    config:
+      path: ./data/moonbridge.db
+      wal: true
+      busy_timeout_ms: 5000
+      max_open_conns: 1
+
+defaults:
+  model: "moonbridge"
+  max_tokens: 65536
+
+models:
+  deepseek-v4-pro:
+    context_window: 1000000
+    max_output_tokens: 384000
+    display_name: "DeepSeek V4 Pro"
+    description: "DeepSeek V4 with selectable high/xhigh reasoning effort."
+    default_reasoning_level: "high"
+    supported_reasoning_levels:
+      - effort: "high"
+        description: "High reasoning effort"
+      - effort: "xhigh"
+        description: "Extra high reasoning effort"
+    supports_reasoning_summaries: true
+    default_reasoning_summary: "auto"
+    extensions:
+      deepseek_v4:
+        enabled: true
+
+providers:
+  deepseek:
+    base_url: "https://api.deepseek.com/anthropic"
+    api_key: "sk-你的DeepSeek密钥"  # ← 替换
+    version: "2023-06-01"
+    user_agent: "moonbridge/1.0"
+    offers:
+      - model: deepseek-v4-pro
+        pricing:
+          input_price: 2
+          output_price: 8
+          cache_write_price: 1
+          cache_read_price: 0.2
+
+routes:
+  moonbridge:
+    model: deepseek-v4-pro
+    provider: deepseek
