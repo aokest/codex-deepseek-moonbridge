@@ -3,13 +3,13 @@ type: Guide
 domain: tech
 status: active
 created: 2026-05-25
-updated: 2026-05-25
-tags: [codex, deepseek, moon-bridge, 开发工具, protocol-bridge, 教程]
+updated: 2026-05-26
+tags: [codex, deepseek, moon-bridge, 开发工具, protocol-bridge, 教程, 九天, 多provider]
 ---
 
 # 在 Mac 上用 DeepSeek 跑 Codex：保姆级配置教程
 
-> 通过 Moon Bridge 协议桥，让 OpenAI Codex CLI/App 使用 DeepSeek V4 模型。实测可用，稳定运行。
+> 通过 Moon Bridge 协议桥，让 OpenAI Codex CLI/App 使用 DeepSeek V4 模型。支持多 Provider（自有 Key + 九天等第三方 API），实测可用，稳定运行。
 
 ## 为什么需要这个教程？
 
@@ -32,7 +32,7 @@ Codex ──Responses API──▶ Moon Bridge ──Chat Completions──▶ D
 | Git | 任意 | 克隆 Moon Bridge 仓库 |
 | DeepSeek API Key | — | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) |
 
-> 💡 **只需 DeepSeek 一个 Key**。不需要 OpenAI Key。
+> **只需 DeepSeek 一个 Key**。不需要 OpenAI Key。
 
 ---
 
@@ -56,11 +56,11 @@ rm /tmp/go.tar.gz
 # → go version go1.25.10 darwin/arm64
 ```
 
-> ⚠️ **Go 版本很重要！** 截至 2026-05，Go 1.26.x 编译 Moon Bridge 会报 `redeclared` 错误（标准库内部冲突）。**必须用 Go 1.25.x**。
+> **Go 版本很重要！** 截至 2026-05，Go 1.26.x 编译 Moon Bridge 会报 `redeclared` 错误（标准库内部冲突）。**必须用 Go 1.25.x**。
 
-> ⚠️ **Intel Mac 用户**：把 `darwin-arm64` 改为 `darwin-amd64`。
+> **Intel Mac 用户**：把 `darwin-arm64` 改为 `darwin-amd64`。
 
-> 💡 **为什么不用 brew？** `brew install go` 下载速度极慢（~1MB/min），且会安装到系统目录需要 sudo。直接下载到用户目录更快、更干净。
+> **为什么不用 brew？** `brew install go` 下载速度极慢（~1MB/min），且会安装到系统目录需要 sudo。直接下载到用户目录更快、更干净。
 
 ---
 
@@ -77,7 +77,7 @@ cd ~/moon-bridge
 mkdir -p ~/moon-bridge/data
 ```
 
-> ⚠️ **这一步很容易漏！** Moon Bridge 默认启用 SQLite 持久化，如果 `data/` 目录不存在，启动时会报错：
+> **这一步很容易漏！** Moon Bridge 默认启用 SQLite 持久化，如果 `data/` 目录不存在，启动时会报错：
 > ```
 > unable to open database file (14)
 > ```
@@ -87,7 +87,11 @@ mkdir -p ~/moon-bridge/data
 
 ## 第三步：配置 config.yml
 
-在 `~/moon-bridge/` 下创建 `config.yml`：
+在 `~/moon-bridge/` 下创建 `config.yml`。
+
+### 3.1 基础配置（单一 Provider）
+
+如果只有一个 DeepSeek Key，用这个最小配置：
 
 ```bash
 cat > ~/moon-bridge/config.yml << 'EOF'
@@ -160,13 +164,102 @@ routes:
 EOF
 ```
 
-> ⚠️ **把 `sk-你的DeepSeek密钥` 替换为你的真实 Key**。从 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 获取。
+> **把 `sk-你的DeepSeek密钥` 替换为你的真实 Key**。从 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 获取。
 
-> ⚠️ **base_url 是 `/anthropic`，不是 `/v1`**。Moon Bridge 通过 Anthropic 兼容协议与 DeepSeek 通信，这是 DeepSeek 推荐的方式。
+> **base_url 是 `/anthropic`，不是 `/v1`**。Moon Bridge 通过 Anthropic 兼容协议与 DeepSeek 通信，这是 DeepSeek 推荐的方式。
 
-> ⚠️ **密钥安全**：`config.yml` 含明文 API Key。确认 `~/moon-bridge/.gitignore` 中已忽略此文件，**切勿推送到公开仓库**。
+> **密钥安全**：`config.yml` 含明文 API Key。确认 `~/moon-bridge/.gitignore` 中已忽略此文件，**切勿推送到公开仓库**。
 
-> 💡 **`deepseek_v4` 扩展**：启用后支持 reasoning effort 选择（high/xhigh），让模型有更强的推理能力。`reinforce_instructions` 会自动强化系统提示，提升 Codex 的指令遵循度。
+> **`deepseek_v4` 扩展**：启用后支持 reasoning effort 选择（high/xhigh），让模型有更强的推理能力。`reinforce_instructions` 会自动强化系统提示，提升 Codex 的指令遵循度。
+
+### 3.2 多 Provider 配置（自有 Key + 九天等第三方 API）
+
+Moon Bridge 支持同时配置多个 Provider，在 Codex 中通过 `/model <slug>` 切换。完整示例见 [config.example.yml](./config.example.yml)。
+
+#### 架构原理
+
+```
+Codex                   Moon Bridge              上游 API
+  │                         │                       │
+  ├─ /model moonbridge ────▶├─ route: moonbridge ───▶├─ deepseek (自有 Key)
+  │                         │                       │  base_url: /anthropic
+  │                         │                       │
+  ├─ /model jt-ds-v3 ──────▶├─ route: jt-ds-v3 ────▶├─ 九天 (JWT Key)
+  │                         │                       │  base_url: /v3
+  │                         │                       │
+  ├─ /model jt-qwen3.5 ────▶├─ route: jt-qwen3.5 ──▶├─ 九天 (同上)
+```
+
+#### 关键规则：Model Key = 上游模型 ID
+
+Moon Bridge 内部 `RouteEntry.Model` 会**直接作为上游 API 的 `model` 参数**发送。因此 `models` 段中的 key 必须与目标 API 要求的模型 ID 完全一致。
+
+| 场景 | 目标 API | 模型 ID 格式 | 示例 |
+|------|---------|-------------|------|
+| DeepSeek 自有 Key | Anthropic 兼容 | `model-name` | `deepseek-v4-pro` |
+| 九天 API | OpenAI 兼容 | `vendor/model-name` | `deepseek/deepseek-v3` |
+| 九天 Qwen 系列 | OpenAI 兼容 | `qwen/qwen3.5-27b` | `qwen/qwen3.5-27b` |
+| 九天 Kimi 系列 | OpenAI 兼容 | `moonshotai/kimi-k2.6` | `moonshotai/kimi-k2.6` |
+
+**常见错误**：使用自定义短名称（如 `jt-deepseek-v3`）作为 models 的 key，导致上游 API 不认识这个模型名，返回 401/404。
+
+#### YAML 注意事项
+
+当 model key 包含 `/` 时，必须用引号包裹：
+
+```yaml
+# 正确
+"deepseek/deepseek-v3":
+  context_window: 131072
+  ...
+
+# 错误 - YAML 解析失败
+deepseek/deepseek-v3:
+  context_window: 131072
+```
+
+#### 不同 Provider 的 base_url 差异
+
+| Provider | base_url | 协议 |
+|----------|---------|------|
+| DeepSeek 自有 Key | `https://api.deepseek.com/anthropic` | Anthropic 兼容 |
+| 九天 | `https://jiutian.10086.cn/largemodel/moma/api/v3` | OpenAI 兼容 |
+
+Moon Bridge 会自动适配不同协议的请求格式，你只需在 `providers` 中配置正确的 `base_url`。
+
+#### 可用模型一览
+
+**DeepSeek 自有 Key（付费）**：
+
+| Route Slug | 上游模型 | 说明 |
+|-----------|---------|------|
+| `moonbridge-flash` | deepseek-v4-flash | 284B/13B active，快速便宜 |
+| `moonbridge` | deepseek-v4-pro | 284B 全量，高推理能力 |
+
+**九天（中国移动，部分免费）**：
+
+| Route Slug | 上游模型 ID | 厂商 |
+|-----------|------------|------|
+| `jt-ds-v3` | `deepseek/deepseek-v3` | DeepSeek |
+| `jt-ds-v32` | `deepseek/deepseek-v32` | DeepSeek |
+| `jt-ds-r1` | `deepseek/deepseek-r1` | DeepSeek |
+| `jt-ds-v4-flash` | `deepseek/deepseek-v4-flash` | DeepSeek |
+| `jt-qwen3.5-27b` | `qwen/qwen3.5-27b` | Qwen |
+| `jt-qwen3.6-35b` | `qwen/qwen3.6-35b` | Qwen |
+| `jt-qwen3-235b` | `qwen/qwen3-235b-a22b-2507` | Qwen |
+| `jt-qwen3.5-397b` | `qwen/qwen3.5-397b-a17b` | Qwen |
+| `jt-qwen3-next-80b` | `qwen/qwen3-next-80b-a3b-instruct` | Qwen |
+| `jt-kimi-k2.5` | `moonshotai/kimi-k2.5-thinking` | Moonshot |
+| `jt-kimi-k2.6` | `moonshotai/kimi-k2.6` | Moonshot |
+| `jt-minimax-latest` | `minimax/minimax-latest` | MiniMax |
+| `jt-minimax-m2.5` | `minimax/minimax-m2.5` | MiniMax |
+| `jt-minimax-m2.7` | `minimax/minimax-m2.7` | MiniMax |
+| `jt-glm-5` | `z.ai/glm-5` | Z.AI |
+| `jt-glm-5.1` | `z.ai/glm-5.1` | Z.AI |
+| `jt-nemotron` | `nvidia/nemotron-3-super-120b-a12b` | NVIDIA |
+| `jt-step-3.5-flash` | `stepfun/step-3.5-flash` | StepFun |
+| `jt-gpt-oss-120b` | `openai/gpt-oss-120b` | OpenAI |
+| `jt-jiutian-lan` | `jiutian/jiutian-lan-236b` | 九天自研 |
 
 ---
 
@@ -186,9 +279,9 @@ go run ./cmd/moonbridge --config config.yml
 Moon Bridge 监听于 127.0.0.1:38440
 ```
 
-> ⚠️ **首次编译较慢**（1-2 分钟），Go 需要下载依赖并编译。后续启动会快很多。
+> **首次编译较慢**（1-2 分钟），Go 需要下载依赖并编译。后续启动会快很多。
 
-> 💡 **快速启动优化**：编译一次后可以保留二进制，避免每次 `go run` 都重新编译：
+> **快速启动优化**：编译一次后可以保留二进制，避免每次 `go run` 都重新编译：
 > ```bash
 > go build -o moonbridge ./cmd/moonbridge
 > # 以后直接用：
@@ -220,7 +313,9 @@ go run ./cmd/moonbridge \
 1. **输出 config.toml 片段**到终端（你需要复制到 `~/.codex/config.toml`）
 2. **自动生成 `~/.codex/models_catalog.json`**（模型元数据，Codex 需要这个文件来识别模型能力）
 
-> ⚠️ **models_catalog.json 必须存在**。没有这个文件，Codex 会提示 "Model metadata not found" 并使用降级模式，影响工具调用和上下文窗口管理。
+> **models_catalog.json 必须存在**。没有这个文件，Codex 会提示 "Model metadata not found" 并使用降级模式，影响工具调用和上下文窗口管理。
+
+> **多 Provider 注意**：如果 `--codex-home` 自动生成遗漏了某些路由的模型条目，需要手动补充 `models_catalog.json`。每个 route slug 对应一条模型记录。
 
 ---
 
@@ -250,11 +345,11 @@ sed -i '' 's/^model_provider = .*/model_provider = "moonbridge"/' ~/.codex/confi
 sed -i '' 's/^model = .*/model = "moonbridge"/' ~/.codex/config.toml
 ```
 
-> ⚠️ **wire_api 必须是 `"responses"`**。如果写成 `"chat"`，Codex 会走 Chat Completions 协议，和 DeepSeek 直连一样会失败。
+> **wire_api 必须是 `"responses"`**。如果写成 `"chat"`，Codex 会走 Chat Completions 协议，和 DeepSeek 直连一样会失败。
 
-> ⚠️ **不要删除已有的其他 provider 配置**。保留原有的 `deepseek`、`openai` 等 provider，随时可以切回。
+> **不要删除已有的其他 provider 配置**。保留原有的 provider，随时可以切回。
 
-> ⚠️ **如果之前登录过 OpenAI**，需要先退出：
+> **如果之前登录过 OpenAI**，需要先退出：
 > ```bash
 > codex logout
 > ```
@@ -270,7 +365,7 @@ sed -i '' 's/^model = .*/model = "moonbridge"/' ~/.codex/config.toml
 curl -s http://127.0.0.1:38440/v1/models | python3 -m json.tool
 ```
 
-应返回包含 `deepseek-v4-pro` 和 `moonbridge` 的模型列表。
+应返回模型列表。如果配置了多 Provider，应能看到所有模型。
 
 ### 7.2 测试完整链路
 
@@ -286,20 +381,35 @@ curl -s -X POST http://127.0.0.1:38440/v1/responses \
   }' | python3 -m json.tool
 ```
 
-应返回 `"status": "completed"`，`"model": "deepseek-v4-pro"`，以及模型的回复。
+应返回 `"status": "completed"` 以及模型的回复。
 
-### 7.3 启动 Codex
+### 7.3 验证多 Provider 切换
+
+```bash
+# 测试九天模型（如果配置了）
+curl -s -X POST http://127.0.0.1:38440/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jt-ds-v3",
+    "input": [
+      {"role": "user", "content": "回复一个字：好"}
+    ],
+    "max_output_tokens": 10
+  }' | python3 -m json.tool
+```
+
+### 7.4 启动 Codex
 
 ```bash
 cd /path/to/your/project
 codex
 ```
 
-在 Codex 中输入一条简单指令（如 "列出当前目录的文件"），确认能正常返回结果。
+在 Codex 中输入 `/model jt-ds-v3` 即可切换到九天模型。输入一条简单指令确认能正常返回结果。
 
-> ⚠️ **如果 Codex 提示 "Model metadata not found"**：说明 `models_catalog.json` 没生成。回到第五步重新执行。
+> **如果 Codex 提示 "Model metadata not found"**：说明 `models_catalog.json` 没生成或不完整。回到第五步，或手动补充缺失的模型条目。
 
-> ⚠️ **如果 Codex 提示要登录 OpenAI**：执行 `codex logout`，然后重试。
+> **如果 Codex 提示要登录 OpenAI**：执行 `codex logout`，然后重试。
 
 ---
 
@@ -374,19 +484,19 @@ curl -s http://127.0.0.1:38440/v1/models
 # 应返回模型列表
 ```
 
-> ⚠️ **KeepAlive=true 的含义**：Moon Bridge 崩溃后 macOS 会自动重启它。这是期望的行为——保证 Codex 随时可用。
+> **KeepAlive=true 的含义**：Moon Bridge 崩溃后 macOS 会自动重启它。这是期望的行为——保证 Codex 随时可用。
 
-> ⚠️ **手动停止服务**：
+> **手动停止服务**：
 > ```bash
 > launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.user.moonbridge.plist
 > ```
 
-> ⚠️ **查看日志**：
+> **查看日志**：
 > ```bash
 > tail -f /tmp/moonbridge.log
 > ```
 
-> 💡 **如果更喜欢用预编译二进制**（避免每次启动等 Go 编译），修改 plist 的 ProgramArguments：
+> **如果更喜欢用预编译二进制**（避免每次启动等 Go 编译），修改 plist 的 ProgramArguments：
 > ```xml
 > <array>
 >     <string>/Users/你的用户名/moon-bridge/moonbridge</string>
@@ -404,7 +514,7 @@ curl -s http://127.0.0.1:38440/v1/models
 |------|------|---------|
 | `connection refused` | Moon Bridge 没启动 | `launchctl list \| grep moonbridge` 检查状态 |
 | `unable to open database file (14)` | `data/` 目录不存在 | `mkdir -p ~/moon-bridge/data` |
-| `401 Unauthorized` | API Key 错误或过期 | 检查 `config.yml` 中的 `api_key` |
+| `401 Unauthorized` | API Key 错误或 model ID 不匹配 | 1) 检查 `api_key` 2) 检查 models 段的 key 是否匹配上游 API 的模型 ID |
 | `402 Payment Required` | DeepSeek 账户余额不足 | 到 [platform.deepseek.com](https://platform.deepseek.com) 充值 |
 | `Model metadata not found` | `models_catalog.json` 缺失 | 重新执行第五步 |
 | Go 编译报 `redeclared` | Go 版本过高（1.26.x） | 降级到 Go 1.25.x |
@@ -412,6 +522,9 @@ curl -s http://127.0.0.1:38440/v1/models
 | 工具调用报错 | Moon Bridge 版本过旧 | `cd ~/moon-bridge && git pull` |
 | `brew install go` 极慢 | brew 镜像问题 | 用本教程的直接下载方式 |
 | Codex App 没走 Moon Bridge | config.toml 未配置 | 确认 `model_provider = "moonbridge"` |
+| 九天模型 401 | model key 不对 | 确认 models 段的 key 是上游 API 要求的完整 ID（如 `deepseek/deepseek-v3`），不要用自定义短名 |
+| 九天模型 404 | base_url 路径不对 | 九天 base_url 应为 `https://jiutian.10086.cn/largemodel/moma/api/v3` |
+| YAML 解析报错 | key 含 `/` 未加引号 | 含 `/` 的 model key 必须用引号包裹：`"deepseek/deepseek-v3"` |
 
 ---
 
@@ -424,7 +537,7 @@ curl -s http://127.0.0.1:38440/v1/models
 | **Codex** | `~/.codex/config.toml` | Responses API | Moon Bridge |
 | **Claude Code** | `~/.claude/` | Anthropic Messages API | 直连 |
 
-> 💡 Codex 和 Claude Code 可以同时运行，互不干扰。甚至可以在同一个项目里交替使用。
+> Codex 和 Claude Code 可以同时运行，互不干扰。甚至可以在同一个项目里交替使用。
 
 ---
 
@@ -439,7 +552,7 @@ curl -s http://127.0.0.1:38440/v1/models
 | `~/moon-bridge/config.yml` | Moon Bridge 配置（含 API Key） |
 | `~/moon-bridge/data/` | SQLite 持久化数据 |
 | `~/.codex/config.toml` | Codex 配置（含 moonbridge provider） |
-| `~/.codex/models_catalog.json` | 模型元数据（自动生成） |
+| `~/.codex/models_catalog.json` | 模型元数据（自动生成或手动补充） |
 | `~/Library/LaunchAgents/com.user.moonbridge.plist` | macOS 自启服务 |
 | `/tmp/moonbridge.log` | Moon Bridge 运行日志 |
 
@@ -483,4 +596,4 @@ rm /tmp/moonbridge.log
 
 ---
 
-*最后更新：2026-05-25，基于实际配置经验整理。*
+*最后更新：2026-05-26，基于多 Provider 实际配置经验整理。*
