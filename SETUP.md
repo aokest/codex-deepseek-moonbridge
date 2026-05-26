@@ -3,8 +3,8 @@ type: Guide
 domain: tech
 status: active
 created: 2026-05-25
-updated: 2026-05-26
-tags: [codex, deepseek, moon-bridge, 开发工具, protocol-bridge, 教程, 九天, 多provider]
+updated: 2026-05-27
+tags: [codex, deepseek, moon-bridge, 开发工具, protocol-bridge, 教程, 九天, 多provider, 调试, debug]
 ---
 
 # 在 Mac 上用 DeepSeek 跑 Codex：保姆级配置教程
@@ -223,7 +223,7 @@ deepseek/deepseek-v3:
 | Provider | base_url | 协议 |
 |----------|---------|------|
 | DeepSeek 自有 Key | `https://api.deepseek.com/anthropic` | Anthropic 兼容 |
-| 九天 | `https://jiutian.10086.cn/largemodel/moma/api/v3` | OpenAI 兼容 |
+| 九天 | `https://jiutian.10086.cn/largemodel/moma/api` | OpenAI Chat Completions |
 
 Moon Bridge 会自动适配不同协议的请求格式，你只需在 `providers` 中配置正确的 `base_url`。
 
@@ -511,6 +511,251 @@ curl -s http://127.0.0.1:38440/v1/models
 ## 常见问题排查
 
 | 问题 | 原因 | 解决方案 |
+
+---
+
+## 第九步：调试方法论与深度排查
+
+本章记录在多 Provider（特别是九天）配置过程中遇到的实际问题、排查思路和解决方案，帮助你理解 Moon Bridge 内部机制，遇到类似问题时能自主排查。
+
+### 9.1 调试核心原则：逐层测试法
+
+调试 Moon Bridge 模型问题时，**从外到内逐层验证**：
+
+```
+第 1 层：上游 API 直连        curl → 九天/DeepSeek API
+第 2 层：Moon Bridge 翻译层   curl → http://127.0.0.1:38440/v1/responses
+第 3 层：Codex 终端            codex CLI 对话
+```
+
+**每层通过才进入下一层**。第 1 层不通，是 API Key 或 model ID 的问题；第 2 层不通，是 Moon Bridge 配置或源码的问题；第 3 层不通，是 Codex config.toml 的问题。
+
+#### 第 1 层测试：直连上游 API
+
+```bash
+# 九天 API 测试（用你的实际 Token 替换）
+curl -s -X POST "https://jiutian.10086.cn/largemodel/moma/api/v3/chat/completions" \
+  -H "Authorization: Bearer 你的九天JWT_Token" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek/deepseek-v3","messages":[{"role":"user","content":"回复一个字：好"}],"max_tokens":10}'
+
+# DeepSeek 自有 Key 测试（Anthropic Messages API）
+curl -s -X POST "https://api.deepseek.com/anthropic/v1/messages" \
+  -H "x-api-key: sk-你的Key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","max_tokens":50,"messages":[{"role":"user","content":"Hi"}]}'
+```
+
+#### 第 2 层测试：Moon Bridge Responses API
+
+```bash
+# 用 route slug 测试
+curl -s -X POST http://127.0.0.1:38440/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model":"jt-ds-v3","input":[{"role":"user","content":"回复一个字：好"}],"max_output_tokens":10}'
+```
+
+### 9.2 实战：九天模型返回 401 的完整排查
+
+**现象**：
+```
+level=ERROR msg=提供商错误 status=401 error="{"code":401,"reason":"Unauthorized",
+"message":"请求携带的API Key校验未通过"}"
+```
+
+**排查过程**：
+
+#### Step 1：验证 API Key 有效性
+
+先用第 1 层测试直连九天 API。如果直连通过，说明 Key 有效，问题在 Moon Bridge 配置。
+
+#### Step 2：检查 protocol 配置（高频陷阱！）
+
+Moon Bridge 的 Provider **默认 protocol 是 `"anthropic"`**。如果不显式声明 `protocol: "openai-chat"`，Moon Bridge 会用 Anthropic Messages API 格式发送请求，九天不认识这个格式。
+
+```yaml
+# ❌ 错误：缺少 protocol 声明，默认 "anthropic"
+jiutian:
+  base_url: "https://jiutian.10086.cn/largemodel/moma/api/v3"
+  api_key: "xxx"
+
+# ✅ 正确：显式声明为 OpenAI Chat Completions
+jiutian:
+  base_url: "https://jiutian.10086.cn/largemodel/moma/api"
+  api_key: "xxx"
+  protocol: "openai-chat"
+  api_version: "v3"
+```
+
+**为什么 DeepSeek 自有 Key 不需要 `protocol`？**
+- DeepSeek 的 `base_url` 以 `/anthropic` 结尾，默认 `"anthropic"` 协议恰好匹配
+- 九天使用 OpenAI Chat Completions 格式，必须切换协议
+
+#### Step 3：检查 API 版本路径
+
+九天 API 的 Chat Completions 端点是 `/v3/chat/completions`（不是 `/v1/chat/completions`）。**旧版 Moon Bridge 硬编码了 `/v1/` 路径**。
+
+如果你使用的 Moon Bridge 版本不支持 `api_version` 配置项，需要手动 patch 源码。检查你的 Moon Bridge 版本：
+
+```bash
+cd ~/moon-bridge
+grep -n 'api_version\|apiVersion\|APIVersion' internal/service/server/server.go internal/service/app/app.go internal/config/config_loader.go internal/protocol/chat/client.go
+```
+
+**如果以上 grep 没有返回结果**，说明你的 Moon Bridge 版本不支持可配置 API version，需要进行以下源码修改。
+
+### 9.3 Moon Bridge 源码 Patch 指南
+
+如果你的 Moon Bridge 版本较旧，需要修改 4 个文件来支持可配置的 API 版本路径：
+
+#### 修改 1：`internal/protocol/chat/client.go`（核心修改）
+
+将硬编码的 `/v1/chat/completions` 改为使用可配置版本：
+
+```go
+// 原始代码（约第 159 行）
+url := c.baseURL + "/v1/chat/completions"
+
+// 修改为
+apiVersion := c.version
+if apiVersion == "" {
+    apiVersion = "v1"
+}
+url := c.baseURL + "/" + apiVersion + "/chat/completions"
+```
+
+#### 修改 2：`internal/service/app/app.go`（创建 client 时传 Version）
+
+```go
+// 原始代码（约第 249 行）
+chatClients[key] = chat.NewClient(chat.ClientConfig{
+    BaseURL:   def.BaseURL,
+    APIKey:    def.APIKey,
+    UserAgent: def.UserAgent,
+})
+
+// 修改为（添加 Version 字段）
+chatClients[key] = chat.NewClient(chat.ClientConfig{
+    BaseURL:   def.BaseURL,
+    APIKey:    def.APIKey,
+    Version:   def.APIVersion,
+    UserAgent: def.UserAgent,
+})
+```
+
+#### 修改 3：`internal/config/config_loader.go`（添加字段 + 映射）
+
+在 `ProviderDefFileConfig` 结构体中添加 `APIVersion` 字段（约第 132 行）：
+
+```go
+type ProviderDefFileConfig struct {
+    // ... 已有字段 ...
+    APIVersion string `yaml:"api_version,omitempty" json:"api_version,omitempty"`
+    // ...
+}
+```
+
+在 `fromProviderDefFileConfig` 函数中映射该字段（约第 534 行）：
+
+```go
+pd := ProviderDef{
+    // ... 已有字段 ...
+    APIVersion:       strings.TrimSpace(def.APIVersion),
+    // ...
+}
+```
+
+#### 修改 4：`internal/service/server/server.go`（fallback 路径补 Version）
+
+`activeChatClient` 方法在从 runtime snapshot 重建 client 时也需传 Version（约第 102 行）：
+
+```go
+// 原始
+return chat.NewClient(chat.ClientConfig{
+    BaseURL:   def.BaseURL,
+    APIKey:    def.APIKey,
+    UserAgent: def.UserAgent,
+})
+
+// 修改为
+return chat.NewClient(chat.ClientConfig{
+    BaseURL:   def.BaseURL,
+    APIKey:    def.APIKey,
+    Version:   def.APIVersion,
+    UserAgent: def.UserAgent,
+})
+```
+
+**为什么 server.go 也需要修改？**
+
+`activeChatClient` 方法先从 runtime snapshot 重建 client（使用运行时配置），**如果这个分支匹配了，永远走不到 `s.chatClients` 的 fallback（app.go 创建的正确版本）**。所以两个地方都需要传 `Version`。
+
+### 9.4 实战：Codex 报 "unknown model" 的排查
+
+**现象**：
+```
+unexpected status 404 Not Found: unknown model: "moonshotai/kimi-k2.6"
+```
+
+**根因**：Codex 从 `/v1/models` 响应中拿到的是模型的实际名称（`moonshotai/kimi-k2.6`），但 Moon Bridge 的路由表只注册了 slug（`jt-kimi-k2.6`）。当 Codex 直接发送原始模型名时，Moon Bridge 找不到对应路由。
+
+**解决方案**：为每个模型添加"裸 model ID"路由。在 `config.yml` 的 `routes` 段中，除了 slug 路由外，再加一份以 model ID 为 key 的路由：
+
+```yaml
+routes:
+  # Slug 路由（给用户通过 /model 切换用）
+  jt-kimi-k2.6:
+    model: moonshotai/kimi-k2.6
+    provider: jiutian
+
+  # 裸 model ID 路由（Codex 直接按 /v1/models 返回的 name 发送时也能解析）
+  "moonshotai/kimi-k2.6":
+    model: moonshotai/kimi-k2.6
+    provider: jiutian
+```
+
+### 9.5 总结：多 Provider 配置 Checklist
+
+在添加新的第三方 API Provider 时，逐项确认以下配置：
+
+| # | 检查项 | 如果不对会发生什么 |
+|---|--------|-------------------|
+| 1 | `protocol` 是否匹配上游 API 类型？ | 默认 `"anthropic"`，非 Anthropic API 会 401/400 |
+| 2 | `api_version` 是否正确（如九天是 `v3`）？ | 路径错误导致 401/404 |
+| 3 | `base_url` 不含版本路径后缀？ | 双重版本路径（如 `/api/v3/v3/chat/completions`） |
+| 4 | `models` 的 key 是否匹配上游 API 的模型 ID？ | 上游不认识模型名，401/404 |
+| 5 | 含 `/` 的 key 是否用引号包裹？ | YAML 解析失败 |
+| 6 | 是否添加了裸 model ID 路由？ | Codex 直接按 model name 调用时 404 |
+| 7 | Moon Bridge 是否支持 `api_version`？ | 旧版硬编码 `/v1/`，需要 patch 源码 |
+
+### 9.6 应用场景
+
+#### 场景 1：快速原型（省钱模式）
+
+用九天免费模型做日常开发：
+- `/model jt-ds-v3` — DeepSeek V3，免费，够用
+- 需要深度推理时切到自有 Key：`/model moonbridge`（DeepSeek V4 Pro）
+
+#### 场景 2：多模型协作
+
+- 主对话用 DeepSeek V4 Pro（自有 Key，推理能力强）
+- 简单任务（代码格式化、注释生成）用九天 Qwen 系列（免费）
+- 长上下文任务用 DeepSeek V4 Flash（1M context，便宜）
+
+#### 场景 3：模型对比测试
+
+在 Codex 中快速切换不同模型对同一问题进行回答，对比质量：
+```
+/model jt-glm-5.1    → 让 GLM-5.1 回答
+/model jt-qwen3.5-397b → 让 Qwen 397B 回答
+/model moonbridge       → 让 DeepSeek V4 Pro 回答
+```
+
+---
+
+## 常见问题排查
+
+| 问题 | 原因 | 解决方案 |
 |------|------|---------|
 | `connection refused` | Moon Bridge 没启动 | `launchctl list \| grep moonbridge` 检查状态 |
 | `unable to open database file (14)` | `data/` 目录不存在 | `mkdir -p ~/moon-bridge/data` |
@@ -522,9 +767,11 @@ curl -s http://127.0.0.1:38440/v1/models
 | 工具调用报错 | Moon Bridge 版本过旧 | `cd ~/moon-bridge && git pull` |
 | `brew install go` 极慢 | brew 镜像问题 | 用本教程的直接下载方式 |
 | Codex App 没走 Moon Bridge | config.toml 未配置 | 确认 `model_provider = "moonbridge"` |
-| 九天模型 401 | model key 不对 | 确认 models 段的 key 是上游 API 要求的完整 ID（如 `deepseek/deepseek-v3`），不要用自定义短名 |
-| 九天模型 404 | base_url 路径不对 | 九天 base_url 应为 `https://jiutian.10086.cn/largemodel/moma/api/v3` |
+| 九天模型 401 | 1) protocol 未声明 2) api_version 不对 3) base_url 含版本后缀 | 1) 加 `protocol: "openai-chat"` 2) 加 `api_version: "v3"` 3) base_url 去掉 `/v3` |
+| 九天模型 404 | 路由表缺少裸 model ID | 为每个模型添加裸 model ID 路由，详见 9.4 节 |
 | YAML 解析报错 | key 含 `/` 未加引号 | 含 `/` 的 model key 必须用引号包裹：`"deepseek/deepseek-v3"` |
+| 所有九天模型都 401 | Moon Bridge 版本过旧硬编码 `/v1/` | 详见 9.3 节源码 Patch 指南，4 个文件需修改 |
+| Codex 报 unknown model | 同九天模型 404 | 添加裸 model ID 路由 |
 
 ---
 
@@ -596,4 +843,4 @@ rm /tmp/moonbridge.log
 
 ---
 
-*最后更新：2026-05-26，基于多 Provider 实际配置经验整理。*
+*最后更新：2026-05-27，基于多 Provider 实际配置与深度调试经验整理。*

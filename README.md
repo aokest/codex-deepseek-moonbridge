@@ -61,7 +61,7 @@ codex
 | 文件 | 内容 |
 |------|------|
 | [README.md](./README.md) | 本文件，快速概览 |
-| [SETUP.md](./SETUP.md) | 完整 8 步配置教程，含多 Provider 章节 |
+| [SETUP.md](./SETUP.md) | 完整 9 步配置教程，含多 Provider 配置、调试方法论、源码 Patch 指南 |
 | [config.example.yml](./config.example.yml) | Moon Bridge 双 Provider 完整配置模板（脱敏） |
 
 ## 关键踩坑经验
@@ -69,7 +69,10 @@ codex
 1. **Model Key = 上游模型 ID**：`config.yml` 中 `models` 段的 key 会被 Moon Bridge 直接作为上游 API 的 `model` 参数发送。用自定义短名会导致 401。必须与上游 API 的模型 ID 完全一致（如九天要求 `deepseek/deepseek-v3` 格式）。
 2. **含 `/` 的 key 必须加引号**：YAML 中 `"deepseek/deepseek-v3"` 要加引号，否则解析失败。
 3. **不同 Provider 的 base_url 不同**：DeepSeek 自有 Key 走 `/anthropic`（Anthropic 兼容），九天走 `/v3`（OpenAI 兼容）。
-4. **Go 版本敏感**：Go 1.26.x 编译 Moon Bridge 会报 `redeclared`，必须用 1.25.x。
+4. **protocol 必须显式声明**：Provider 默认 protocol 是 `"anthropic"`。使用 OpenAI Chat Completions API 的 Provider（如九天）必须加 `protocol: "openai-chat"`，否则 Moon Bridge 会用 Anthropic 格式发请求，导致 401。
+5. **api_version 决定了上游 API 路径**：Moon Bridge 构造的 URL 为 `{base_url}/{api_version}/chat/completions`。九天 API 需要 `api_version: "v3"`。旧版 Moon Bridge 硬编码了 `/v1/`，需手动 patch 源码（详见 SETUP.md 第九步）。
+6. **Go 版本敏感**：Go 1.26.x 编译 Moon Bridge 会报 `redeclared`，必须用 1.25.x。
+7. **需要裸 model ID 路由**：Codex 从 `/v1/models` 拿到 model name 后可能直接传原始 ID，路由表需要同时注册 slug 和原始 ID 两份路由条目。
 
 ## 常见问题
 
@@ -80,7 +83,9 @@ codex
 | `brew install go` 极慢 | 用本教程的直接下载方式 |
 | Codex 提示登录 OpenAI | `codex logout` |
 | `Model metadata not found` | 重新生成 `models_catalog.json` |
-| 九天模型 401 | 检查 model key 是否匹配上游 API 格式 |
+| 九天模型 401 | 1) 加 `protocol: "openai-chat"` 2) 加 `api_version: "v3"` 3) base_url 去掉 `/v3` 后缀 4) 如仍有问题，详见 SETUP.md 第九步 |
+| 九天模型 404 (unknown model) | 添加裸 model ID 路由，详见 SETUP.md 9.4 |
+| 调试方法 | 详见 [SETUP.md 第九步：调试方法论与深度排查](./SETUP.md#第九步调试方法论与深度排查) |
 
 ## License
 

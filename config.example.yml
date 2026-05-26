@@ -239,13 +239,20 @@ providers:
           cache_write_price: 1
           cache_read_price: 0.2
 
-  # Provider B：九天（中国移动，标准 OpenAI 兼容协议）
+  # Provider B：九天（中国移动，标准 OpenAI Chat Completions 协议）
   # 认证方式：Authorization: Bearer <JWT>
-  # base_url 为标准 OpenAI 兼容路径 /v3
+  # 关键配置：
+  #   - protocol: "openai-chat" — 必须显式声明，默认 "anthropic" 会导致 401
+  #   - api_version: "v3" — 九天 API 路径为 /v3/chat/completions（非 /v1/）
+  #   - base_url 不含 /v3 后缀 — api_version 会自动拼接路径
+  # 如果 Moon Bridge 版本较旧（不含 api_version 支持），需手动 patch 源码，
+  # 详见 SETUP.md 第九步「调试方法论与深度排查」。
   jiutian:
-    base_url: "https://jiutian.10086.cn/largemodel/moma/api/v3"
+    base_url: "https://jiutian.10086.cn/largemodel/moma/api"
     api_key: "你的九天JWT密钥"  # ← 替换为你的 JWT Key
     version: "2023-06-01"
+    protocol: "openai-chat"
+    api_version: "v3"
     user_agent: "moonbridge/1.0"
     offers:
       - model: deepseek/deepseek-v3
