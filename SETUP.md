@@ -260,6 +260,9 @@ Moon Bridge 会自动适配不同协议的请求格式，你只需在 `providers
 | `jt-step-3.5-flash` | `stepfun/step-3.5-flash` | StepFun |
 | `jt-gpt-oss-120b` | `openai/gpt-oss-120b` | OpenAI |
 | `jt-jiutian-lan` | `jiutian/jiutian-lan-236b` | 九天自研 |
+| `codex-auto-review` | deepseek-v4-pro | **Codex 内置审核模型（必须）** |
+
+> **`codex-auto-review` 必须配置**。Codex 执行高风险操作前会调用此模型做安全审查。如果路由表没有此条目，审核失败会被 Codex 当作"拒绝"，导致大量操作被拦截。
 
 ---
 
@@ -727,8 +730,33 @@ routes:
 | 5 | 含 `/` 的 key 是否用引号包裹？ | YAML 解析失败 |
 | 6 | 是否添加了裸 model ID 路由？ | Codex 直接按 model name 调用时 404 |
 | 7 | Moon Bridge 是否支持 `api_version`？ | 旧版硬编码 `/v1/`，需要 patch 源码 |
+| 8 | 是否配置了 `codex-auto-review` 路由？ | Codex 自动审核全部被拒绝，详见 9.6 节 |
 
-### 9.6 应用场景
+### 9.6 实战：Codex 自动审核失败（大量"已拒绝高风险操作"）
+
+**现象**：
+```
+自动审核已拒绝高风险操作
+自动审核已拒绝高风险操作
+...（连续重复）
+Automatic approval review failed: unexpected status 404 Not Found:
+unknown model: "codex-auto-review"
+```
+
+**根因**：Codex 在执行高风险工具调用前，会向 Moon Bridge 发送一个使用 `codex-auto-review` 模型的审核请求。Moon Bridge 路由表中没有这个模型名，返回 404。Codex 的安全机制将"审核失败"等同于"拒绝"，所以任何需要审核的操作全部被拦截。
+
+**解决方案**：添加路由，指向一个推理能力强的模型：
+
+```yaml
+routes:
+  codex-auto-review:
+    model: deepseek-v4-pro
+    provider: deepseek
+```
+
+审核模型不需要单独定义在 `models` 段，Codex 内部已注册此模型名，仅需路由即可。
+
+### 9.7 应用场景
 
 #### 场景 1：快速原型（省钱模式）
 
@@ -772,6 +800,7 @@ routes:
 | YAML 解析报错 | key 含 `/` 未加引号 | 含 `/` 的 model key 必须用引号包裹：`"deepseek/deepseek-v3"` |
 | 所有九天模型都 401 | Moon Bridge 版本过旧硬编码 `/v1/` | 详见 9.3 节源码 Patch 指南，4 个文件需修改 |
 | Codex 报 unknown model | 同九天模型 404 | 添加裸 model ID 路由 |
+| 大量"自动审核已拒绝高风险操作" | `codex-auto-review` 路由缺失 | 添加路由指向可用模型（如 deepseek-v4-pro），详见 9.6 节 |
 
 ---
 

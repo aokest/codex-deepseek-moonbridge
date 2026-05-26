@@ -381,3 +381,12 @@ routes:
   jt-jiutian-lan:
     model: jiutian/jiutian-lan-236b
     provider: jiutian
+
+  # Codex 内置自动审核模型 — 必须配置！
+  # Codex 执行高风险操作前，会调用 codex-auto-review 模型做安全审查。
+  # 如果 Moon Bridge 路由表没有此条目，审核请求返回 404，
+  # Codex 会将"审核失败"视为"拒绝"，导致大量操作被拦截。
+  # 指向你最强的模型即可（推理能力越好，审核越准确）。
+  codex-auto-review:
+    model: deepseek-v4-pro
+    provider: deepseek

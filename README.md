@@ -73,6 +73,7 @@ codex
 5. **api_version 决定了上游 API 路径**：Moon Bridge 构造的 URL 为 `{base_url}/{api_version}/chat/completions`。九天 API 需要 `api_version: "v3"`。旧版 Moon Bridge 硬编码了 `/v1/`，需手动 patch 源码（详见 SETUP.md 第九步）。
 6. **Go 版本敏感**：Go 1.26.x 编译 Moon Bridge 会报 `redeclared`，必须用 1.25.x。
 7. **需要裸 model ID 路由**：Codex 从 `/v1/models` 拿到 model name 后可能直接传原始 ID，路由表需要同时注册 slug 和原始 ID 两份路由条目。
+8. **`codex-auto-review` 路由必须配置**：Codex 的高风险操作自动审核依赖此模型，缺失会导致大量操作被拦截。
 
 ## 常见问题
 
@@ -85,6 +86,7 @@ codex
 | `Model metadata not found` | 重新生成 `models_catalog.json` |
 | 九天模型 401 | 1) 加 `protocol: "openai-chat"` 2) 加 `api_version: "v3"` 3) base_url 去掉 `/v3` 后缀 4) 如仍有问题，详见 SETUP.md 第九步 |
 | 九天模型 404 (unknown model) | 添加裸 model ID 路由，详见 SETUP.md 9.4 |
+| 大量"自动审核已拒绝" | 添加 `codex-auto-review` 路由，详见 SETUP.md 9.6 |
 | 调试方法 | 详见 [SETUP.md 第九步：调试方法论与深度排查](./SETUP.md#第九步调试方法论与深度排查) |
 
 ## License
