@@ -49,6 +49,7 @@ codex
 |----------|--------|------|------|
 | DeepSeek 自有 Key | 2 | 付费 | DeepSeek V4 Flash / Pro |
 | 九天（中国移动） | 20 | 部分免费 | DeepSeek、Qwen、Kimi、MiniMax、GLM 等系列 |
+| 小米 MiMo（新加坡） | 4 | 付费 | MiMo V2 Omni / V2.5 Pro / V2.5 / V2 Pro |
 
 完整模型列表和配置示例见 **[config.example.yml](./config.example.yml)**。
 
@@ -63,6 +64,8 @@ codex
 | [README.md](./README.md) | 本文件，快速概览 |
 | [SETUP.md](./SETUP.md) | 完整 9 步配置教程，含多 Provider 配置、调试方法论、源码 Patch 指南 |
 | [config.example.yml](./config.example.yml) | Moon Bridge 双 Provider 完整配置模板（脱敏） |
+| [generate_config.py](./generate_config.py) | 交互式配置生成器（自动生成 config.yml） |
+| [test_providers.sh](./test_providers.sh) | Provider 连通性测试脚本 |
 
 ## 关键踩坑经验
 
@@ -74,6 +77,9 @@ codex
 6. **Go 版本敏感**：Go 1.26.x 编译 Moon Bridge 会报 `redeclared`，必须用 1.25.x。
 7. **需要裸 model ID 路由**：Codex 从 `/v1/models` 拿到 model name 后可能直接传原始 ID，路由表需要同时注册 slug 和原始 ID 两份路由条目。
 8. **`codex-auto-review` 路由必须配置**：Codex 的高风险操作自动审核依赖此模型，缺失会导致大量操作被拦截。
+9. **小米 MiMo 模型均为推理模型**：所有 MiMo 模型输出包含 `reasoning_content`，`max_tokens` 设为 10-50 会导致空响应，建议至少 200+。
+10. **mimo-v2-flash 不支持**：新加坡小米端点不提供此模型，不要配置。
+11. **mimo-v2-omni 是唯一的多模态模型**：需要视觉/图片理解时用此模型，256K 上下文。
 
 ## 常见问题
 
@@ -87,6 +93,8 @@ codex
 | 九天模型 401 | 1) 加 `protocol: "openai-chat"` 2) 加 `api_version: "v3"` 3) base_url 去掉 `/v3` 后缀 4) 如仍有问题，详见 SETUP.md 第九步 |
 | 九天模型 404 (unknown model) | 添加裸 model ID 路由，详见 SETUP.md 9.4 |
 | 大量"自动审核已拒绝" | 添加 `codex-auto-review` 路由，详见 SETUP.md 9.6 |
+| 小米模型返回空内容 | 所有 MiMo 均为推理模型，max_tokens 设太低（10-50）导致 reasoning 吃掉了全部 token 预算，建议 200+ |
+| 小米模型 404 (Not supported) | mimo-v2-flash 在新加坡端点不可用，去掉此模型 |
 | 调试方法 | 详见 [SETUP.md 第九步：调试方法论与深度排查](./SETUP.md#第九步调试方法论与深度排查) |
 
 ## License

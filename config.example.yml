@@ -211,6 +211,32 @@ models:
     display_name: "九天 LAN 236B"
     description: "九天自研 LAN 236B 模型"
 
+  # ===== Provider C：小米 MiMo（标准 OpenAI 兼容协议）=====
+  # 所有 MiMo 模型均为推理模型，需要注意 reasoning/max_tokens 配置
+  mimo-v2-omni:
+    context_window: 256000
+    max_output_tokens: 16384
+    display_name: "MiMo V2 Omni (小米)"
+    description: "小米 MiMo V2 Omni - 多模态视觉模型，256K 上下文"
+
+  mimo-v2.5-pro:
+    context_window: 1000000
+    max_output_tokens: 16384
+    display_name: "MiMo V2.5 Pro (小米)"
+    description: "小米 MiMo V2.5 Pro - 1M 上下文"
+
+  mimo-v2.5:
+    context_window: 1000000
+    max_output_tokens: 16384
+    display_name: "MiMo V2.5 (小米)"
+    description: "小米 MiMo V2.5 - 1M 上下文"
+
+  mimo-v2-pro:
+    context_window: 1000000
+    max_output_tokens: 16384
+    display_name: "MiMo V2 Pro (小米)"
+    description: "小米 MiMo V2 Pro - 1M 上下文"
+
 # ============================================================
 # Provider 定义
 # ============================================================
@@ -294,6 +320,30 @@ providers:
       - model: openai/gpt-oss-120b
         pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
       - model: jiutian/jiutian-lan-236b
+        pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
+
+  # Provider C：小米 MiMo（新加坡端，标准 OpenAI Chat Completions 协议）
+  # 注意：
+  #   - protocol: "openai-chat" — 必须显式声明
+  #   - 不需要 api_version 字段，默认用 /v1/
+  #   - base_url 不含 /v1 后缀，Moon Bridge 自动拼接 /v1/chat/completions
+  #   - 所有 MiMo 模型均为推理模型（reasoning），需要足够的 max_tokens（建议 200+）
+  #   - mimo-v2-omni 是唯一支持多模态/视觉的模型（256K 上下文）
+  #   - mimo-v2-flash 在新加坡端不支持，不要添加
+  xiaomi:
+    base_url: "https://token-plan-sgp.xiaomimimo.com"
+    api_key: "tp-你的小米API密钥"  # ← 替换为你的 Key
+    version: "2023-06-01"
+    protocol: "openai-chat"
+    user_agent: "moonbridge/1.0"
+    offers:
+      - model: mimo-v2-omni
+        pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
+      - model: mimo-v2.5-pro
+        pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
+      - model: mimo-v2.5
+        pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
+      - model: mimo-v2-pro
         pricing: {input_price: 0, output_price: 0, cache_write_price: 0, cache_read_price: 0}
 
 # ============================================================
@@ -390,3 +440,30 @@ routes:
   codex-auto-review:
     model: deepseek-v4-pro
     provider: deepseek
+
+  # 小米 MiMo
+  xm-omni:
+    model: mimo-v2-omni
+    provider: xiaomi
+  xm-v2.5-pro:
+    model: mimo-v2.5-pro
+    provider: xiaomi
+  xm-v2.5:
+    model: mimo-v2.5
+    provider: xiaomi
+  xm-v2-pro:
+    model: mimo-v2-pro
+    provider: xiaomi
+  # 小米 MiMo 裸模型 ID 路由（Codex 可能直接发送 model name）
+  mimo-v2-omni:
+    model: mimo-v2-omni
+    provider: xiaomi
+  mimo-v2.5-pro:
+    model: mimo-v2.5-pro
+    provider: xiaomi
+  mimo-v2.5:
+    model: mimo-v2.5
+    provider: xiaomi
+  mimo-v2-pro:
+    model: mimo-v2-pro
+    provider: xiaomi
